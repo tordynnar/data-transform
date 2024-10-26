@@ -8,7 +8,6 @@ wasmtime::component::bindgen!({
     tracing: true,
     trappable_error_type: {
         "wasi:io/streams/stream-error" => wasmtime_wasi::StreamError,
-        //"wasi:filesystem/types/error-code" => crate::filesystem::FsError,
         "wasi:sockets/network/error-code" => wasmtime_wasi::SocketError,
     },
     trappable_imports: true,
@@ -20,7 +19,6 @@ wasmtime::component::bindgen!({
         "wasi:sockets": wasmtime_wasi::bindings::sync::sockets,
         "wasi:filesystem/types/descriptor": crate::filesystem::Descriptor,
         "wasi:filesystem/types/directory-entry-stream": wasmtime_wasi::bindings::sync::filesystem::types::DirectoryEntryStream,
-        //"wasi:filesystem/types/error-code": wasmtime_wasi::bindings::async_io::wasi::filesystem::types::ErrorCode,
     },
     require_store_data_send: true,
 });
