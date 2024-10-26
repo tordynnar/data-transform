@@ -1,0 +1,15 @@
+[package]
+name = "data-transform"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.90"
+async-trait = "0.1.83"
+bytes = "1.7.2"
+derive-new = "0.7.0"
+thiserror = "1.0.64"
+tracing = "0.1.40"
+tracing-subscriber = "0.3.18"
+wasmtime = "25.0.2"
+wasmtime-wasi = "25.0.2"
