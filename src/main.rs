@@ -11,10 +11,15 @@ mod context;
 use wasmtime::{Config, Engine, Store};
 use wasmtime::component::{Linker, Component};
 use wasmtime_wasi::bindings::sync::Command;
-use anyhow::Error;
+use anyhow::{Error, anyhow};
 use std::sync::Arc;
 use filesystem::OutputFile;
 use context::{Context, remove_mutex};
+use clap::Parser;
+use std::path::PathBuf;
+use std::fs;
+use std::hash::{DefaultHasher, Hash, Hasher};
+use tracing::info;
 
 #[derive(Debug)]
 pub struct RunResult {
@@ -53,9 +58,58 @@ pub fn run(engine: &Engine, linker: &Linker<Context>, component: &Component, con
     })
 }
 
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Cli {
+    #[arg(long)]
+    components: PathBuf,
+
+    #[arg(long)]
+    input: PathBuf,
+
+    #[arg(long)]
+    output: PathBuf,
+}
+
+pub fn validate_directory(path: &PathBuf) -> Result<(), Error> {
+    if !path.is_dir() {
+        Err(anyhow!("{} must be a directory", path.display()))
+    } else {
+        Ok(())
+    }
+}
+
+pub fn load_component(engine: &Engine, path: &PathBuf) -> Result<Component, Error> {
+    let mut hasher = DefaultHasher::new();
+    engine.precompile_compatibility_hash().hash(&mut hasher);
+    let hash = hasher.finish();
+
+    let mut precompiled = path.to_owned().into_os_string();
+    precompiled.push(format!(".precompiled_{:x}", hash));
+    let precompiled : PathBuf = precompiled.into();
+    
+    let component = if precompiled.is_file() {
+        info!("Found precompiled component at {}", precompiled.display());
+        let component = unsafe { Component::deserialize_file(engine, precompiled)? };
+        component
+    } else {
+        info!("Compiling {}", path.display());
+        let component = Component::from_file(&engine, path)?;
+        fs::write(precompiled, component.serialize()?)?;
+        component
+    };
+
+    Ok(component)
+}
+
 pub fn main() -> Result<(), Error> {
     tracing_subscriber::fmt().init();
 
+    let args = Cli::parse();
+    validate_directory(&args.components)?;
+    validate_directory(&args.input)?;
+    validate_directory(&args.output)?;
+    
     let mut config = Config::new();
     config.wasm_component_model(true);
     config.consume_fuel(true);
@@ -65,12 +119,31 @@ pub fn main() -> Result<(), Error> {
     let mut linker: Linker<Context> = Linker::new(&engine);
     bindings::add_to_linker_all(&mut linker)?;
 
-    let component = Component::from_file(&engine, "../wasi-command-module/target/wasm32-wasip2/release/wasi-command-module.wasm")?;
+    let component_paths = fs::read_dir(args.components)?
+        .filter_map(|p| p.ok() )
+        .map(|p| p.path())
+        .filter(|p| p.extension().map(|s| s == "wasm").unwrap_or(false))
+        .collect::<Vec<_>>();
 
-    let context = Context::new(1_000_000_000, 10_000, 1_000_000_000, 1000, Arc::new("hello world".to_owned().into_bytes()));
-    let result = run(&engine, &linker, &component, context);
+    let components = component_paths.iter()
+        .map(|p| load_component(&engine, p))
+        .collect::<Result<Vec<_>,_>>()?;
 
-    println!("{:?}", result);
+    let input_paths = fs::read_dir(args.input)?
+        .filter_map(|p| p.ok() )
+        .map(|p| p.path())
+        .collect::<Vec<_>>();
+
+    for input_path in input_paths {
+        // TODO: Check file size, loopback new content
+        let data = Arc::new(fs::read(input_path)?);
+
+        for component in &components {
+            let context = Context::new(1_000_000_000, 10_000, 1_000_000_000, 1000, data.clone());
+            let result = run(&engine, &linker, component, context);
+            println!("{:?}", result);
+        }
+    }
 
     Ok(())
 }
